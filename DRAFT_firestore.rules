@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    // --- User Validation ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'name', 'email', 'createdAt', 'updatedAt'])
+        && data.id == request.auth.uid
+        && data.name is string && data.name.size() <= 50
+        && data.email is string && data.email.size() <= 100
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn(); // Allow profile discovery for ID search
+      allow list: if isSignedIn() && request.query.limit <= 20; // Restricted listing for discovery
+
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && (
+        // Action: Update Profile
+        (incoming().diff(existing()).affectedKeys().hasOnly(['name', 'avatar', 'status', 'theme', 'updatedAt'])
+         && incoming().updatedAt == request.time)
+      );
+    }
+
+    // --- Chat Validations ---
+    function isMember(chatId) {
+      return isSignedIn() && get(/databases/$(database)/documents/chats/$(chatId)).data.members.keys().hasAny([request.auth.uid]);
+    }
+    
+    function isValidChat(data) {
+      return data.keys().hasAll(['id', 'type', 'members', 'createdAt', 'updatedAt'])
+        && data.members.keys().hasAny([request.auth.uid])
+        && data.type in ['private', 'group']
+        && data.createdAt == request.time;
+    }
+
+    match /chats/{chatId} {
+      allow read: if isSignedIn() && existing().members.keys().hasAny([request.auth.uid]);
+      allow create: if isSignedIn() && isValidChat(incoming());
+      allow update: if isSignedIn() && existing().members.keys().hasAny([request.auth.uid]) && (
+        // Action: Update metadata or members
+        incoming().diff(existing()).affectedKeys().hasAny(['lastMessage', 'updatedAt', 'name', 'members'])
+        && incoming().updatedAt == request.time
+      );
+
+      match /messages/{messageId} {
+        allow read: if isMember(chatId);
+        allow create: if isMember(chatId) 
+          && incoming().senderId == request.auth.uid
+          && incoming().chatId == chatId
+          && incoming().createdAt == request.time;
+        allow delete: if isMember(chatId) && existing().senderId == request.auth.uid;
+      }
+    }
+
+    match /users/{userId}/contacts/{contactId} {
+      allow read, write: if isOwner(userId);
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "LuminaChat",
+  "description": "A secure, feature-rich messaging platform with E2EE, real-time location sharing, multimedia support, and customizable 3D themes.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "real_time_chat",
+    "file_sharing",
+    "ai_assistant"
+  ]
+}
